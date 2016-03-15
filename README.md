@@ -10,4 +10,4 @@ Code used for reproducing the summary statistics and figures from the Nature Sci
 
 -----
 ### PCBC Data Analysis Code
-Extensive code for analyzing the PCBC C4 data is avaliable at [Sage-Bionetworks/pcbc_c4_analysis](Sage-Bionetworks/pcbc_c4_analysis).
+Extensive code for analyzing the PCBC C4 data is avaliable at [Sage-Bionetworks/pcbc_c4_analysis](https://www.github.com/Sage-Bionetworks/pcbc_c4_analysis).
