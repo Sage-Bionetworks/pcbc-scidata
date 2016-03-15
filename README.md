@@ -7,3 +7,7 @@ This repository contains scripts used for preparation of Nature Scientific Data 
 -----
 ### Nature Scientific Data reproducibility
 Code used for reproducing the summary statistics and figures from the Nature Scientific Data Descriptor paper are available [here](pcbcr-summaries.R).
+
+-----
+### PCBC Data Analysis Code
+Extensive code for analyzing the PCBC C4 data is avaliable at [Sage-Bionetworks/pcbc_c4_analysis](Sage-Bionetworks/pcbc_c4_analysis).
