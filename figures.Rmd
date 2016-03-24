@@ -1,0 +1,218 @@
+---
+title: "Figures"
+author: "Kenneth Daily"
+date: "March 24, 2016"
+output: html_document
+---
+
+```{r libs, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+# Load required libraries
+library(synapseClient)
+library(ggplot2)
+library(RColorBrewer)
+library(gplots)
+library(edgeR)
+library(reshape2)
+library(data.table)
+library(dplyr)
+library(knitr)
+library(stringr)
+## Needs the dev branch
+library(githubr)
+
+cv.test = function(x,y) {
+  CV = sqrt(chisq.test(x, y, correct=FALSE)$statistic /
+    (length(x) * (min(length(unique(x)),length(unique(y))) - 1)))
+  return(as.numeric(CV))
+}
+
+factorCramersV <- function(x) {
+  cov_comparisons <- expand.grid(colnames(x), colnames(x))
+
+  cov.corr <- apply(cov_comparisons, 1, function(x) {
+    tmp <- na.omit(covariates[, x])
+    # tmp <- covariates[, x]
+    if ((length(levels(factor(tmp[, x[1]]))) > 1) & 
+        (length(levels(factor(tmp[, x[2]]))) > 1)) {
+      cv.test(factor(tmp[, x[1]]), 
+              factor(tmp[, x[2]]))
+    }
+    else {
+      0
+    }
+  }
+  )
+
+  cov_comparisons$cramer <- cov.corr
+
+  cramer_mat <- reshape2::dcast(cov_comparisons, Var1 ~ Var2)
+  rownames(cramer_mat) <- cramer_mat$Var1
+  cramer_mat$Var1 <- NULL
+  cramer_mat
+}
+
+## Requires ggdendro
+devtools::source_url("https://raw.githubusercontent.com/chr1swallace/random-functions/master/R/ggplot-heatmap.R")
+
+# knit2synapse::knitToFolderEntity(file = "./CovariateAnalysis_mRNA_mixedEffects_All.Rmd", entityName = 'Covariate Analysis mRNA Mixed Effects All', parentId = 'syn3256504', overwrite=F, knitmd = TRUE)
+
+synapseLogin()
+
+# # source utility files from ../R/lib folder
+# # These should be moved to a package - very fragile way to do this!
+# file.sources = list.files('../R/lib',pattern="*.R$", full.names=TRUE)
+# tmp = sapply(file.sources, source,.GlobalEnv)
+
+knitr::opts_chunk$set(
+  echo=FALSE,
+  warning=FALSE,
+  message=FALSE,
+  error = FALSE,
+  tidy = FALSE,
+  cache = TRUE)
+```
+
+```{r setup, include=TRUE, echo=FALSE}
+# Input Parameters
+COUNT_ID <- 'syn5008587'
+METADATA_ID <- 'syn3156503'
+
+# Specify factor and continuous covariates (adjusted covariates will only be
+# a subset of these covariates)
+factor_covariates <- c('Diffname_short', 'run', 'lane', 'Cell_Line_Type',
+                      'Cell_Line_of_Origin', 'Tissue_of_Origin',
+                      'Reprogramming_Gene_Combination', 'Culture_Conditions',
+                      'Donor_Life_Stage', 'Race', 'Ethnicity' , 'Gender',
+                      'Disease', 'Originating_Lab', 'Donor_ID',
+                      'Cell_Type_of_Origin_Level2', 'Reprogramming_Vector_Type')
+```
+
+The eXpress-generated effective count matrix that has been collapsed from transcripts to genes is used (`r COUNT_ID`). 
+
+The metadata comes from the table `r METADATA_ID`. 
+
+Factor covariates considered for analysis are:
+
+```{r factorcov}
+paste(gsub('_','\\\\_',factor_covariates),collapse=', ')
+```
+
+```{r getdata, cache=FALSE, include=TRUE}
+# Get count matrix
+count_obj <- synGet(COUNT_ID)
+countData = fread(getFileLocation(count_obj), data.table=FALSE)
+row.names(countData) = countData[,1]
+```
+
+```{r getmetadata, cache=FALSE, include=TRUE}
+# Get metadata
+metadata_obj <- synTableQuery(paste('SELECT * FROM',METADATA_ID,sep=' '))
+metadata <- metadata_obj@values
+
+metadata[metadata == 'N/A'] <- NA
+
+# Replace all special characters with blank
+myFix <- function(x) str_replace_all(x, '[^[:alnum:]]', '')
+metadata <- metadata %>%
+  dplyr::mutate_each(funs(myFix), -UID, -C4_Cell_Line_ID, -biologicalSampleName,
+                     -public, -pass_qc, -exclude) # fix them but don't touch some columns
+
+# Set rownames
+rownames(metadata) = metadata$UID
+```
+### Filter data
+* Keep only public samples
+* Remove somatic samples and samples with not type.
+* Remove samples that failed QC and samples classified as exclude.
+* Remove samples with abnormal karyotypes.
+```{r filtering, echo=TRUE, include=TRUE}
+#### Pre processing mRNA expression counts and metadata ####
+metadata_keep <- metadata %>% 
+  filter(UID %in% colnames(countData))
+
+metadata_filtered <- metadata_keep %>%
+  filter(public,
+         Diffname_short != "",
+         Cell_Type == "PSC",
+         pass_qc, !exclude,
+         C4_Karyotype_Result != "abnormal")
+
+metadata <- metadata_filtered
+# rownames(metadata) <- metadata_filtered$UID
+countData <- countData[, c('hg19.kgXref.geneSymbol', metadata$UID)]
+```
+
+### CPM Normalisation
+Determine design matrix for normalisation and differential expression analysis. 
+
+Remove genes that have less than 1 cpm counts in at least 50% of each of the individual differentiation stages.
+```{r cpmnormalisation}
+tmp <- tapply(metadata$UID,
+              factor(metadata$Diffname_short),
+              function(cols, countData) {
+                mat <- DGEList(counts=countData[,cols])
+                cpms <- cpm(mat)
+                fracSamplesWithMinCPM <- rowMeans(cpms >= 1)
+                isNonLowExpr <- fracSamplesWithMinCPM >= 0.5
+                print(summary(isNonLowExpr))
+                cpms[isNonLowExpr, ]
+              },
+              countData)
+
+
+ugenes <- unique(as.character(unlist(lapply(tmp, 
+                                            function(x) rownames(x)))))
+
+countData <- countData %>% filter(hg19.kgXref.geneSymbol %in% ugenes)
+```
+### Covariate clustering
+Determine relationship between covariates using correlation statistics.
+
+```{r covariates.correlation, fig.width=10, fig.height=10}
+# Find inter relation between factor covariates
+covariates = metadata[, factor_covariates]
+
+# Convert factor covariates to factors
+covariates[,factor_covariates] = lapply(covariates[,factor_covariates], factor)
+
+cramer_mat <- factorCramersV(covariates[, factor_covariates])
+
+p <- ggheatmap(as.matrix(cramer_mat),hm.colours=brewer.pal(9,'Reds'))
+p$col <- p$col + theme(text=element_text(size=18))
+p$centre <- p$centre + theme(text=element_text(size=18))
+ggheatmap.show(p, col.width=1, row.width=0.15)
+
+
+```
+
+Principal components analysis of initial normalized data (with NULL design)
+```{r pca, fig.height=8, fig.width=8}
+voom_gene_expression <- voom(countData[, metadata$UID], design=NULL)
+
+pc <- prcomp(voom_gene_expression$E, center=FALSE, scale=FALSE)
+
+# Plot first 2 PCs
+plotdata <- data.frame(UID=rownames(pc$rotation), 
+                       PC1=pc$rotation[,1], 
+                       PC2=pc$rotation[,2],
+                       PC3=pc$rotation[,3],
+                       PC4=pc$rotation[,4])
+
+plotdata <- merge(plotdata, metadata, by="UID")
+plotdata <- dplyr::rename(plotdata, DifferentiationStage=Diffname_short)
+plotdata$DifferentiationStage <- factor(plotdata$DifferentiationStage,
+                                        levels=c("SC", "DE", "MESO5", "ECTO",
+                                                 "MESO15", "MESO30", "EB"),
+                                        ordered=TRUE)
+
+p <- ggplot(plotdata, aes(x=PC1, y=PC2))
+p <- p + geom_point(aes(color=DifferentiationStage, shape=Gender), size=3)
+p <- p +  scale_color_manual(values=c("Black", "Red", "Blue", "Green", "Purple",
+                                      "Orange", "Brown"),
+                             guide=guide_legend(nrow=1, title=NULL))
+
+p <- p + theme_bw() + theme(legend.position="top",
+                            text=element_text(size=16),
+                            title=element_text(size=16)) 
+p
+```
