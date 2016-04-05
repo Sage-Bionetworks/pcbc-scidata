@@ -17,38 +17,33 @@ library(data.table)
 library(dplyr)
 library(knitr)
 library(stringr)
+library(vcd)
 ## Needs the dev branch
 library(githubr)
 
-cv.test = function(x,y) {
-  CV = sqrt(chisq.test(x, y, correct=FALSE)$statistic /
-    (length(x) * (min(length(unique(x)),length(unique(y))) - 1)))
-  return(as.numeric(CV))
+cov.corr.fxn <- function(Var1, Var2) {
+  
+  tmp <- na.omit(covariates[, c(Var1, Var2)])
+  
+  fac1 <- factor(tmp[, Var1])
+  fac2 <- factor(tmp[, Var2])
+  
+  stats = assocstats(xtabs(~fac1 + fac2))
+  
+  return(data.frame(cv=stats$cramer,
+                    p.value=stats$chisq_tests['Pearson','P(> X^2)']))
 }
 
-factorCramersV <- function(x) {
+factorCramersV <- function(x, p) {
   cov_comparisons <- expand.grid(colnames(x), colnames(x))
-
-  cov.corr <- apply(cov_comparisons, 1, function(x) {
-    tmp <- na.omit(covariates[, x])
-    # tmp <- covariates[, x]
-    if ((length(levels(factor(tmp[, x[1]]))) > 1) & 
-        (length(levels(factor(tmp[, x[2]]))) > 1)) {
-      cv.test(factor(tmp[, x[1]]), 
-              factor(tmp[, x[2]]))
-    }
-    else {
-      0
-    }
-  }
-  )
-
-  cov_comparisons$cramer <- cov.corr
-
-  cramer_mat <- reshape2::dcast(cov_comparisons, Var1 ~ Var2)
-  rownames(cramer_mat) <- cramer_mat$Var1
-  cramer_mat$Var1 <- NULL
-  cramer_mat
+  res <- ldply(apply(cov_comparisons, 1, 
+                     function(x) {
+                       cov.corr.fxn(Var1=x['Var1'],
+                                     Var2=x['Var2'])
+                     }))
+  
+  cov_comparisons <- cbind(cov_comparisons, res)
+  cov_comparisons
 }
 
 ## Requires ggdendro
@@ -175,7 +170,12 @@ covariates = metadata[, factor_covariates]
 # Convert factor covariates to factors
 covariates[,factor_covariates] = lapply(covariates[,factor_covariates], factor)
 
-cramer_mat <- factorCramersV(covariates[, factor_covariates])
+cov_comparisons <- factorCramersV(covariates[, factor_covariates])
+
+cramer_mat <- reshape2::dcast(cov_comparisons %>% filter(p.value < 0.1), 
+                              Var1 ~ Var2, value.var="cv", fill=0)
+rownames(cramer_mat) <- cramer_mat$Var1
+cramer_mat$Var1 <- NULL
 
 p <- ggheatmap(as.matrix(cramer_mat),hm.colours=brewer.pal(9,'Reds'))
 p$col <- p$col + theme(text=element_text(size=18))
