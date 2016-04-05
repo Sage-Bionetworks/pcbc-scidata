@@ -90,11 +90,7 @@ metadata <- metadata %>%
 # Set rownames
 rownames(metadata) = metadata$UID
 ```
-### Filter data
-* Keep only public samples
-* Remove somatic samples and samples with not type.
-* Remove samples that failed QC and samples classified as exclude.
-* Remove samples with abnormal karyotypes.
+
 ```{r filtering, echo=TRUE, include=TRUE}
 #### Pre processing mRNA expression counts and metadata ####
 metadata_keep <- metadata %>% 
