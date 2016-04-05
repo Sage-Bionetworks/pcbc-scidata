@@ -53,14 +53,7 @@ factorCramersV <- function(x, p) {
 ## Requires ggdendro
 devtools::source_url("https://raw.githubusercontent.com/chr1swallace/random-functions/master/R/ggplot-heatmap.R")
 
-# knit2synapse::knitToFolderEntity(file = "./CovariateAnalysis_mRNA_mixedEffects_All.Rmd", entityName = 'Covariate Analysis mRNA Mixed Effects All', parentId = 'syn3256504', overwrite=F, knitmd = TRUE)
-
 synapseLogin()
-
-# # source utility files from ../R/lib folder
-# # These should be moved to a package - very fragile way to do this!
-# file.sources = list.files('../R/lib',pattern="*.R$", full.names=TRUE)
-# tmp = sapply(file.sources, source,.GlobalEnv)
 
 knitr::opts_chunk$set(
   echo=FALSE,
@@ -69,10 +62,6 @@ knitr::opts_chunk$set(
   error = FALSE,
   tidy = FALSE,
   cache = TRUE)
-```
-
-```{r setup, include=TRUE, echo=FALSE}
-# Get metadata
 ```
 
 ```{r getdata, cache=FALSE, include=TRUE}
