@@ -27,10 +27,14 @@ library(githubr)
 
 library(ComplexHeatmap)
 library(circlize)
+
+# Simple covariate correlation function
+# returns Cramer's V and p-value of a chi square test
+# Drops any rows with NA values prior to computing
 cov.corr.fxn <- function(Var1, Var2) {
   
-  # tmp <- na.omit(covariates[, c(Var1, Var2)])
-  tmp <- covariates[, c(Var1, Var2)]
+  tmp <- na.omit(covariates[, c(Var1, Var2)])
+  
   fac1 <- factor(tmp[, Var1])
   fac2 <- factor(tmp[, Var2])
   
@@ -40,6 +44,7 @@ cov.corr.fxn <- function(Var1, Var2) {
                     p.value=stats$chisq_tests['Pearson','P(> X^2)']))
 }
 
+# Computes pairwise column correlations using Cramer's V
 factorCramersV <- function(x, p) {
   cov_comparisons <- expand.grid(colnames(x), colnames(x))
   res <- ldply(apply(cov_comparisons, 1, 
@@ -52,14 +57,7 @@ factorCramersV <- function(x, p) {
   cov_comparisons
 }
 
-# knit2synapse::knitToFolderEntity(file = "./CovariateAnalysis_mRNA_mixedEffects_All.Rmd", entityName = 'Covariate Analysis mRNA Mixed Effects All', parentId = 'syn3256504', overwrite=F, knitmd = TRUE)
-
 synapseLogin()
-
-# # source utility files from ../R/lib folder
-# # These should be moved to a package - very fragile way to do this!
-# file.sources = list.files('../R/lib',pattern="*.R$", full.names=TRUE)
-# tmp = sapply(file.sources, source,.GlobalEnv)
 
 knitr::opts_chunk$set(
   echo=FALSE,
@@ -69,17 +67,11 @@ knitr::opts_chunk$set(
   tidy = FALSE,
   cache = FALSE)
 
-factor_covariates <- c('Diffname_short', 'run', 'lane', 'Cell_Line_Type',
-                       'Cell_Line_of_Origin', 'Tissue_of_Origin',
-                       'Reprogramming_Gene_Combination', 'Culture_Conditions',
-                       'Donor_Life_Stage', 'Gender', 'Originating_Lab', 'Donor_ID',
-                       'Cell_Type_of_Origin_Level2', 'Reprogramming_Vector_Type')
-
 set.seed(1234567890)
 ```
 
 ```{r include=TRUE, echo=FALSE}
-# Input Parameters
+# Synapse IDs of data matrix and metadata tables
 mrnaDataId <- 'syn5008587'
 mrnaMetadataId <- 'syn3156503'
 
@@ -89,25 +81,17 @@ mirnaReadsId = "syn5014445"
 
 methylDataId = "syn2233188"
 methylMetadataId = "syn3156828"
-
 ```
 
-The effective count matrix generated from eXpress was collapsed from transcripts to genes. We use this count matrix here (`r mrnaDataId`). 
-
-Factor covariates considered for analysis are:
-
-```{r results='asis'}
-cat(paste(gsub('_','\\\\_',factor_covariates), collapse=', '))
-```
-
-```{r}
+```{r mrnadata}
 # Get count matrix
 count_obj <- synGet(mrnaDataId)
-countData = fread(getFileLocation(count_obj), data.table=FALSE, showProgress=FALSE)
+countData = fread(getFileLocation(count_obj), 
+                  data.table=FALSE, showProgress=FALSE)
 row.names(countData) = countData[,1]
 ```
 
-```{r}
+```{r mrnametadata}
 # Get metadata
 metadata_obj <- synTableQuery(paste('SELECT * FROM', mrnaMetadataId))
 metadata <- metadata_obj@values
@@ -123,12 +107,8 @@ metadata <- metadata %>%
 # Set rownames
 rownames(metadata) = metadata$UID
 ```
-### Filter data
-We remove sample lines with abnormal karyotypes (syn2679104). We also removed samples that failed QC at the time of sequencing and those that were flagged as problematic after alignment.
 
-We remove genes that have less than 1 cpm counts in at least 50% of each of the individual differentiation stages.
-
-```{r filtering}
+```{r mrnafiltering}
 metadata_keep <- metadata %>% 
   filter(UID %in% colnames(countData))
 
@@ -141,9 +121,7 @@ metadata_filtered <- metadata_keep %>%
 metadata <- metadata_filtered
 rownames(metadata) <- metadata$UID
 countData <- countData[, c('hg19.kgXref.geneSymbol', metadata$UID)]
-```
 
-```{r}
 tmp <- tapply(metadata$UID,
               factor(metadata$Diffname_short),
               function(cols, countData) {
@@ -159,38 +137,12 @@ tmp <- tapply(metadata$UID,
 ugenes <- as.character(unlist(lapply(tmp, rownames)))
 
 countData <- countData %>% filter(hg19.kgXref.geneSymbol %in% ugenes)
-```
-### Covariate clustering
-```{r fig.width=10, fig.height=10}
-covariates = metadata[, factor_covariates]
 
-# Convert factor covariates to factors
-covariates[,factor_covariates] = lapply(covariates[,factor_covariates], 
-                                        factor)
-
-cov_comparisons <- factorCramersV(covariates[, factor_covariates])
-
-cramer_mat <- reshape2::dcast(cov_comparisons %>% 
-                                filter(p.value < 0.1), 
-                              Var1 ~ Var2, value.var="cv", 
-                              fill=0)
-
-rownames(cramer_mat) <- cramer_mat$Var1
-cramer_mat$Var1 <- NULL
-
-Heatmap(as.matrix(cramer_mat), name="Cramer's V",
-        col=brewer.pal(9, "Reds"),
-        clustering_method_rows="ward.D",
-        clustering_method_columns="ward.D",
-        column_names_max_height = unit(6, "cm"),
-        row_names_max_width = unit(6, "cm"),
-        show_row_dend=FALSE)
+metadata.mrna <- metadata
 
 ```
 
-Principal components analysis of normalized data using a null design matrix.
-
-```{r fig.height=8, fig.width=8}
+```{r mrnapca, fig.height=8, fig.width=8}
 voom_gene_expression <- voom(countData[, metadata$UID], design=NULL)
 
 pc <- prcomp(voom_gene_expression$E, center=TRUE, scale=FALSE)
@@ -226,7 +178,7 @@ pcamRNA <- pcamRNA + labs(title = "mRNA",
 
 ```
 
-```{r}
+```{r mirnadata}
 mat_obj =  synGet(id=mirnaDataId)
 # mat = fread(mat_obj@filePath, data.table=FALSE, showProgress=FALSE)
 mat = read.table(mat_obj@filePath, check.names = F, header=T, sep="\t")
@@ -237,7 +189,7 @@ reads_obj =  synGet(id=mirnaReadsId)
 reads = read.table(reads_obj@filePath, check.names = F, header=T, sep="\t", row.names=1)
 ```
 
-```{r}
+```{r mirnametadata}
 metadata_obj = synTableQuery(paste('SELECT * FROM', mirnaMetadataId))
 metadata = metadata_obj@values
 metadata[metadata == 'N/A'] <- NA
@@ -252,7 +204,7 @@ metadata <- metadata %>%
 rownames(metadata) = metadata$UID
 ```
 
-```{r echo=TRUE}
+```{r mirnafiltering}
 #### Pre processing mRNA expression counts and metadata ####
 metadata_keep <- metadata %>% 
   filter(UID %in% colnames(mat))
@@ -266,9 +218,7 @@ metadata_filtered <- metadata_keep %>%
 metadata <- metadata_filtered
 # rownames(metadata) <- metadata_filtered$UID
 mat <- mat[, c('featureName', metadata$UID)]
-```
 
-```{r}
 reads = reads[metadata$UID,]
 
 keep = reads %>% 
@@ -301,10 +251,11 @@ ugenes <- unique(as.character(unlist(lapply(tmp,
 
 mat <- mat %>% filter(featureName %in% ugenes)
 
+metadata.mirna <- metadata
 ```
 
 
-```{r fig.height=8, fig.width=8}
+```{r mirnapca, fig.height=8, fig.width=8}
 voom_gene_expression <- voom(mat[, metadata$UID], design=NULL)
 
 pc <- prcomp(voom_gene_expression$E, center=TRUE, scale=FALSE)
@@ -340,13 +291,13 @@ pcamiRNA <- pcamiRNA + labs(title = "microRNA",
 
 ```
 
-```{r}
+```{r methyldata}
 mat_obj =  synGet(id=methylDataId)
 mat = fread(mat_obj@filePath, data.table=FALSE, showProgress=FALSE)
 rownames(mat) <- mat$ProbeID
 ```
 
-```{r}
+```{r methylmetadata}
 metadata_obj = synTableQuery(paste('SELECT * FROM', methylMetadataId))
 metadata = metadata_obj@values
 metadata[metadata == 'N/A'] <- NA
@@ -361,7 +312,7 @@ metadata <- metadata %>%
 rownames(metadata) = metadata$UID
 ```
 
-```{r}
+```{r methylfiltering}
 #### Pre processing mRNA expression counts and metadata ####
 metadata_keep <- metadata %>% 
   filter(UID %in% colnames(mat))
@@ -376,17 +327,22 @@ metadata_filtered <- metadata_keep %>%
 metadata <- metadata_filtered
 # rownames(metadata) <- metadata_filtered$UID
 mat <- mat[, c('ProbeID', metadata$UID)]
-```
 
-```{r}
+metadata.methyl <- metadata
+
 exp.variance <- apply(as.matrix(mat[, metadata$UID]), 1, var)
-ind.remove1 <- exp.variance < sort(exp.variance)[round(0.25*length(exp.variance))]
-ind.remove2 <- (rowSums(mat <= 0.25)/dim(mat)[2] == 1) | (rowSums(mat >= 0.75)/dim(mat)[2] == 1)
+methyl.var.cutoff <- quantile(exp.variance)['25%'] 
+ind.remove1 <- exp.variance < methyl.var.cutoff
+#ind.remove1 <- exp.variance < sort(exp.variance)[round(0.25*length(exp.variance))]
+
+nsamples <- ncol(mat[, metadata$UID])
+ind.remove2 <- ((rowSums(mat[, metadata$UID] <= 0.25) / nsamples) == 1) | 
+  ((rowSums(mat[, metadata$UID] >= 0.75) / nsamples) == 1)
 
 mat <- mat[!ind.remove1 & !ind.remove2,]
 ```
 
-```{r fig.height=8, fig.width=8}
+```{r methylpca, fig.height=8, fig.width=8}
 pc <- prcomp(mat[, metadata$UID], center=TRUE, scale=FALSE)
 
 # Plot first 2 PCs
@@ -407,8 +363,7 @@ plotdata$DifferentiationStage <- factor(plotdata$DifferentiationStage,
 pcaMethyl <- ggplot(plotdata, aes(x=PC1, y=PC2))
 pcaMethyl <- pcaMethyl + geom_point(aes(color=DifferentiationStage), size=3)
 pcaMethyl <- pcaMethyl +  scale_color_manual(values=c("Black", "Red", "Blue", 
-                                                      "Green", "Purple",
-                                                      "Orange", "Brown"),
+                                                      "Green", "Brown"),
                                              guide=guide_legend(nrow=1, title=NULL))
 
 pcaMethyl <- pcaMethyl + theme_bw() + theme(legend.position="top",
@@ -418,6 +373,66 @@ pcaMethyl <- pcaMethyl + labs(title = "Methylation",
                               x=sprintf("PC1 (%0.0f%%)", var.pc1),
                               y=sprintf("PC2 (%0.0f%%)", var.pc2))
 ```
+
+### Covariate clustering
+```{r covclustering}
+factor_covariates <- c(#'Diffname_short', 
+                       'Cell_Line_Type',
+                       'Cell_Line_of_Origin', 'Tissue_of_Origin',
+                       'Reprogramming_Gene_Combination', 'Culture_Conditions',
+                       'Donor_Life_Stage', 'Gender', 'Originating_Lab', 'Donor_ID',
+                       'Cell_Type_of_Origin_Level2', 'Reprogramming_Vector_Type')
+
+metadata.merge <- rbind(metadata.mrna[, c("C4_Cell_Line_ID", factor_covariates)],
+                        metadata.mirna[, c("C4_Cell_Line_ID", factor_covariates)],
+                        metadata.methyl[, c("C4_Cell_Line_ID", factor_covariates)]) %>% unique
+
+covariates = metadata.merge[, factor_covariates]
+
+# Convert factor covariates to factors
+covariates[,factor_covariates] = lapply(covariates[,factor_covariates], 
+                                        factor)
+
+cov_comparisons <- factorCramersV(covariates[, factor_covariates])
+
+cramer_mat <- reshape2::dcast(cov_comparisons,# %>% filter(p.value < 0.1), 
+                              Var1 ~ Var2, value.var="cv", 
+                              fill=0)
+
+rownames(cramer_mat) <- cramer_mat$Var1
+cramer_mat$Var1 <- NULL
+```
+
+We examined the cell line covariates for potential correlations. All variables included are factors and Cramer's V was used as the statistic. The resulting pairwise values were clustered using hierarchical clustering using Ward's method with Euclidean distance. The variables included are `r cat(paste(gsub('_','\\\\_',factor_covariates), collapse=', '))`.
+
+```{r covheatmap, fig.width=10, fig.height=10}
+
+Heatmap(as.matrix(cramer_mat), name="Cramer's V",
+        col=brewer.pal(9, "Reds"),
+        clustering_method_rows="ward.D",
+        clustering_method_columns="ward.D",
+        column_names_max_height = unit(6, "cm"),
+        row_names_max_width = unit(6, "cm"),
+        show_row_dend=FALSE)
+
+```
+
+### Filtering cell lines
+We remove sample lines with abnormal karyotypes (syn2679104). We also removed samples that failed quality control at the time of assay (low RIN, etc.) and those that were flagged as problematic after alignment (mRNA and miRNA) or microarray analysis (methylation).
+
+### Filtering assay data
+
+#### mRNA
+We use the effective count matrix generated from eXpress and collapsed it from transcripts to genes by summing the counts (`r mrnaDataId`). We remove genes that have less than 1 count per million (CPM) in more than half of the samples within each individual differentiation stage.
+
+#### miRNA
+We use the effective count matrix generated from `seqbuster` (`r mirnaDataId`). We remove samples that have less than 500000 aligned reads or have less than 20% of the total reads aligned. We remove miRNAs that have less than 10 CPM in at least 90% of each of the individual differentiation stages.
+
+#### Methylation
+We use the probe-level beta matrix from `minfi` (`r methylDataId`). We remove probes with beta value variance lower than the 25th percentile (`r methyl.var.cutoff`) or with beta values all below 0.25 or all above 0.75.
+
+### Principal components analysis
+We use PCA to visualize the samples in each assay using centered, non-scaled data. We plot the first two principal components and color the points by the differentiation stage. As expected, the samples generally cluster by differentiation stage, indicating this variable is a strong driver of the variability in the datasets.
 
 ```{r fig.width=20, fig.height=10}
 multiplot(pcamRNA, pcamiRNA, pcaMethyl, cols=3)
