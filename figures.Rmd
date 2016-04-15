@@ -145,7 +145,7 @@ metadata.mrna <- metadata
 ```{r mrnapca, fig.height=8, fig.width=8}
 voom_gene_expression <- voom(countData[, metadata$UID], design=NULL)
 
-pc <- prcomp(voom_gene_expression$E, center=TRUE, scale=FALSE)
+pc <- prcomp(voom_gene_expression$E, center=TRUE, scale=TRUE)
 
 # Plot first 2 PCs
 plotdata <- data.frame(UID=rownames(pc$rotation), 
@@ -180,7 +180,7 @@ pcamRNA <- pcamRNA + labs(title = "mRNA",
 
 ```{r mirnadata}
 mat_obj =  synGet(id=mirnaDataId)
-# mat = fread(mat_obj@filePath, data.table=FALSE, showProgress=FALSE)
+# mat = fread(mat_obj@filePath, data.table=FALSE, showProgress=FALSE, fill=TRUE)
 mat = read.table(mat_obj@filePath, check.names = F, header=T, sep="\t")
 
 mat$featureName <- rownames(mat)
@@ -258,7 +258,7 @@ metadata.mirna <- metadata
 ```{r mirnapca, fig.height=8, fig.width=8}
 voom_gene_expression <- voom(mat[, metadata$UID], design=NULL)
 
-pc <- prcomp(voom_gene_expression$E, center=TRUE, scale=FALSE)
+pc <- prcomp(voom_gene_expression$E, center=TRUE, scale=TRUE)
 
 # Plot first 2 PCs
 plotdata <- data.frame(UID=rownames(pc$rotation), 
@@ -343,7 +343,7 @@ mat <- mat[!ind.remove1 & !ind.remove2,]
 ```
 
 ```{r methylpca, fig.height=8, fig.width=8}
-pc <- prcomp(mat[, metadata$UID], center=TRUE, scale=FALSE)
+pc <- prcomp(mat[, metadata$UID], center=TRUE, scale=TRUE)
 
 # Plot first 2 PCs
 plotdata <- data.frame(UID=rownames(pc$rotation), 
