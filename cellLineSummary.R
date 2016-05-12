@@ -7,6 +7,7 @@ library(stringr)
 library(tidyr)
 
 synapseLogin()
+
 qr <- synapseQuery("select * from file where projectId=='syn1773109'", blockSize = 250)
 d <- qr$collectAll()
 save(d, file="syn1773109.RData")
