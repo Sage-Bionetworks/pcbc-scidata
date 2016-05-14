@@ -8,6 +8,10 @@ library(tidyr)
 
 synapseLogin()
 
+cellMetadataTbl <- synTableQuery('select * from syn2767694')
+cellMetadata <- cellMetadataTbl@values %>% filter(public, Cell_Type %in% c('PSC'))
+
+
 qr <- synapseQuery("select * from file where projectId=='syn1773109'", blockSize = 250)
 d <- qr$collectAll()
 save(d, file="syn1773109.RData")
@@ -17,7 +21,8 @@ load("syn1773109.RData")
 d2 <- d %>% filter(file.public=='true', file.Cell_Type %in% c('PSC', 'somatic'))
 
 keepCols <- c("file.C4_Cell_Line_ID", "file.dataType", "file.dataSubType", "file.fileType",
-              "file.Donor_ID", "file.Cell_Line_Type", "file.Cell_Type", "file.Diffname_short")
+              "file.Donor_ID", "file.Cell_Line_Type", "file.Cell_Type", "file.Diffname_short",
+              "file.C4_Karyotype_Result", "file.pass_qc", "file.exclude")
 
 d.mRNAC4 <- d2 %>% filter(file.dataType == 'mRNA', file.fileType == 'fastq') %>%
   select(one_of(keepCols)) %>% 
@@ -66,13 +71,24 @@ dC4 <- rbind(d.mRNAC4, d.miRNAC4, d.MethlC4, d.TeratomaReportC4,
              d.TeratomaHEC4, d.TeratomaIHCC4, 
              d.karyoReportC4, d.CNVReportC4)
 
-dC4 %>% 
-  group_by(file.dataType, file.dataSubType, file.fileType) %>% 
+dC4Used <- dC4 %>% filter(file.C4_Karyotype_Result == "normal", 
+                          file.pass_qc == "true", 
+                          file.exclude == "false")
+
+
+dC4Used %>% 
+  filter(file.dataType %in% c("mRNA", "miRNA", "methylation")) %>% 
   summarise(n=n_distinct(file.C4_Cell_Line_ID))
 
 dC4 %>% 
-  group_by(file.dataType) %>% 
-  summarise(n=n_distinct(file.C4_Cell_Line_ID))
+  group_by(file.dataType, file.Cell_Line_Type) %>% 
+  summarise(n=n_distinct(file.C4_Cell_Line_ID)) %>% 
+  reshape2::dcast(file.dataType ~ file.Cell_Line_Type) 
+
+dC4 %>% 
+  group_by(file.Cell_Line_Type) %>% 
+  summarise(n=n_distinct(file.C4_Cell_Line_ID)) %>% 
+  reshape2::dcast(file.dataType ~ file.Cell_Line_Type) 
 
 dC4 %>% 
   group_by(file.dataType) %>%
