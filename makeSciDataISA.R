@@ -12,10 +12,13 @@ cellMetadataTbl <- synTableQuery('select * from syn2767694')
 cellMetadata <- cellMetadataTbl@values %>% filter(public, Cell_Type %in% c('PSC'))
 
 
-qr <- synapseQuery("select * from file where projectId=='syn1773109'", blockSize = 250)
-d <- qr$collectAll()
-save(d, file="syn1773109.RData")
-#load("syn1773109.RData")
+# qr <- synapseQuery("select * from file where projectId=='syn1773109'", blockSize = 250)
+# d <- qr$collectAll()
+# save(d, file="syn1773109.RData")
+# f <- synStore(File("syn1773109.RData", parentId="syn6174635"), forceVersion=FALSE)
+
+f <- synGet("syn6174636")
+load(getFileLocation(f))
 
 # Only getting pluripotent stem cell public files
 d2 <- d %>% filter(file.public=='true', file.Cell_Type %in% c('PSC'))
